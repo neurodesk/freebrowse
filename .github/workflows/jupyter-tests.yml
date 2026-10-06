@@ -1,0 +1,38 @@
+name: Jupyter integration
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  authentication:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        jupyterhub: ["5.4.5", "6.0.1"]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest jupyter-server "jupyterhub==${{ matrix.jupyterhub }}"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - run: npm install --prefix "$RUNNER_TEMP/dom-tests" --no-audit --no-fund jsdom@26.1.0 typescript@5.2.2 @lumino/signaling@2.1.5
+      - run: PYTHONPATH=jupyter python -m pytest jupyter/tests
+        env:
+          NEURODESKTOP_LAUNCHER_TEST_NODE_MODULES: ${{ runner.temp }}/dom-tests/node_modules
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - run: npm ci --no-audit --no-fund
+      - run: npm run test:run
+      - run: npm run build:jupyter
