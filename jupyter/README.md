@@ -30,3 +30,8 @@ The tests execute JupyterHub's signed-cookie and XSRF code over real HTTP.
 Only the Hub API token lookup is replaced with a local fixture. They cover
 root and user base paths, module and stylesheet requests, anonymous and invalid
 cookies, cross-site requests, missing metadata, mutations, and path traversal.
+
+Forks run the Jupyter and frontend validation workflow with a read-only token.
+The inherited GitHub Pages build, deployment, and release jobs run only in
+`freesurfer/freebrowse`. Forks do not configure Pages, request a deployment token,
+or create upstream version tags/releases, including on manual dispatch.
