@@ -39,6 +39,12 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # Same check the publish job runs, but here it fails the run before the
+      # release job creates a tag, so a bad package never leaves a half-done release.
+      - name: Build and check the npm package
+        working-directory: frontend
+        run: npm run build:package && npm run pack:check
+
       - name: Build for GitHub Pages (serverless mode)
         working-directory: frontend
         env:
@@ -95,6 +101,10 @@ jobs:
     if: github.repository == 'freesurfer/freebrowse' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
+    outputs:
+      # true only when this run created the release, i.e. the version is new
+      published: ${{ steps.tagcheck.outputs.exists == 'false' }}
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -136,3 +146,59 @@ jobs:
             (file://) or serve locally with `python3 -m http.server`.
           files: release-assets/freebrowse-*.html
           make_latest: true
+
+  # Publish the npm package for the version the release job just tagged, so the
+  # package on the registry always matches a v<version> release of main. Uses
+  # npm trusted publishing (OIDC via id-token: write): no NPM_TOKEN secret, and
+  # npm attaches a provenance attestation linking the package to this run. The
+  # one-time setup is on npmjs.com (package Settings > Trusted Publisher:
+  # GitHub Actions, freesurfer/freebrowse, deploy-gh-pages.yml).
+  publish:
+    runs-on: ubuntu-latest
+    needs: release
+    if: github.repository == 'freesurfer/freebrowse' && github.ref == 'refs/heads/main' && needs.release.outputs.published == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # Install and build with Node 22's bundled npm, the same major the build
+      # job uses, so a lockfile quirk cannot fail here after the release exists.
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build and check the package
+        working-directory: frontend
+        run: npm run build:package && npm run pack:check
+
+      - name: Update npm (trusted publishing needs npm >= 11.5.1)
+        run: npm install -g npm@latest && npm --version
+
+      - name: Publish to npm
+        working-directory: frontend
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        # The trusted publisher on npmjs.com requires staged publishing: the
+        # version lands on the registry unlisted, and a maintainer approves it
+        # with 2FA (`npm stage approve <id>` or the package's page on npmjs.com)
+        # before it becomes public. Plain `npm publish` is refused unless
+        # "allow npm publish" is enabled for the publisher. The dist-tag is
+        # fixed at staging time: a pre-release version (2.6.0-next.1) goes under
+        # `next` so `latest` keeps pointing at the last full release.
+        run: |
+          if [[ "$VERSION" == *-* ]]; then
+            npm stage publish --tag next
+          else
+            npm stage publish
+          fi
