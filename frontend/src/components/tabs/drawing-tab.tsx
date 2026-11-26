@@ -1,9 +1,6 @@
+import { useId } from "react";
 import { useFreeBrowseStore } from "@/store";
-import {
-  Save,
-  Pencil,
-  Undo,
-} from "lucide-react";
+import { Save, Pencil, Undo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,9 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { LabeledSliderWithInput } from "@/components/ui/labeled-slider-with-input";
 import { Select } from "@/components/ui/select";
+import NiiVue from "@niivue/niivue";
 
 interface DrawingTabProps {
+  nvRef: React.RefObject<NiiVue | null>;
   onDrawModeChange: (mode: "none" | "pen" | "wand") => void;
+  onDrawingColormapChange: (
+    event: React.ChangeEvent<HTMLSelectElement>,
+  ) => void;
   onPenFillChange: (checked: boolean) => void;
   onPenErasesChange: (checked: boolean) => void;
   onPenValueChange: (value: number) => void;
@@ -26,7 +28,9 @@ interface DrawingTabProps {
 }
 
 export default function DrawingTab({
+  nvRef,
   onDrawModeChange,
+  onDrawingColormapChange,
   onPenFillChange,
   onPenErasesChange,
   onPenValueChange,
@@ -37,16 +41,18 @@ export default function DrawingTab({
   onDrawUndo,
   onSaveDrawing,
 }: DrawingTabProps) {
+  const uid = useId();
   const drawingOptions = useFreeBrowseStore((s) => s.drawingOptions);
   const setDrawingOptions = useFreeBrowseStore((s) => s.setDrawingOptions);
+
+  // Drawing colormaps are the `_`-prefixed draw LUTs, NOT the volume colormaps.
+  const drawColormaps: string[] = nvRef.current?.drawingColormaps ?? [];
 
   return (
     <div className="flex flex-col h-full">
       <div className="border-b px-4 py-3">
         <h2 className="text-lg font-semibold">Drawing Tools</h2>
-        <p className="text-sm text-muted-foreground">
-          Edit annotations
-        </p>
+        <p className="text-sm text-muted-foreground">Edit annotations</p>
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 space-y-4">
@@ -54,9 +60,7 @@ export default function DrawingTab({
             <>
               {/* Drawing Filename Input */}
               <div className="space-y-2">
-                <Label className="text-sm font-medium">
-                  Filename
-                </Label>
+                <Label className="text-sm font-medium">Filename</Label>
                 <Input
                   type="text"
                   value={drawingOptions.filename}
@@ -80,17 +84,28 @@ export default function DrawingTab({
                 step={0.01}
               />
 
+              {/* Drawing Colormap */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Drawing Colormap</Label>
+                <Select
+                  value={drawingOptions.colormap}
+                  onChange={onDrawingColormapChange}
+                >
+                  {drawColormaps.map((cm) => (
+                    <option key={cm} value={cm}>
+                      {cm}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
               {/* Draw Mode Selector */}
               <div className="space-y-2">
-                <Label className="text-sm font-medium">
-                  Draw Mode
-                </Label>
+                <Label className="text-sm font-medium">Draw Mode</Label>
                 <Select
                   value={drawingOptions.mode}
                   onChange={(e) =>
-                    onDrawModeChange(
-                      e.target.value as "none" | "pen" | "wand",
-                    )
+                    onDrawModeChange(e.target.value as "none" | "pen" | "wand")
                   }
                 >
                   <option value="none">None</option>
@@ -121,14 +136,11 @@ export default function DrawingTab({
                   {drawingOptions.mode === "pen" && (
                     <div className="flex items-center space-x-2">
                       <Checkbox
-                        id="pen-fill"
+                        id={`${uid}-pen-fill`}
                         checked={drawingOptions.penFill}
                         onCheckedChange={onPenFillChange}
                       />
-                      <Label
-                        htmlFor="pen-fill"
-                        className="text-sm font-medium"
-                      >
+                      <Label htmlFor={`${uid}-pen-fill`} className="text-sm font-medium">
                         Pen Fill
                       </Label>
                     </div>
@@ -138,12 +150,12 @@ export default function DrawingTab({
                   {drawingOptions.mode === "pen" && (
                     <div className="flex items-center space-x-2">
                       <Checkbox
-                        id="pen-erases"
+                        id={`${uid}-pen-erases`}
                         checked={drawingOptions.penErases}
                         onCheckedChange={onPenErasesChange}
                       />
                       <Label
-                        htmlFor="pen-erases"
+                        htmlFor={`${uid}-pen-erases`}
                         className="text-sm font-medium"
                       >
                         Pen Erases
@@ -155,12 +167,12 @@ export default function DrawingTab({
                   {drawingOptions.mode === "wand" && (
                     <div className="flex items-center space-x-2">
                       <Checkbox
-                        id="magic-wand-2d-only"
+                        id={`${uid}-magic-wand-2d-only`}
                         checked={drawingOptions.magicWand2dOnly}
                         onCheckedChange={onMagicWand2dOnlyChange}
                       />
                       <Label
-                        htmlFor="magic-wand-2d-only"
+                        htmlFor={`${uid}-magic-wand-2d-only`}
                         className="text-sm font-medium"
                       >
                         2D Only

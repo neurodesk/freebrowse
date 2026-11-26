@@ -2,16 +2,23 @@ import { useFreeBrowseStore } from "@/store";
 import ImageUploader from "./image-uploader";
 import ImageCanvas from "./image-canvas";
 import type { ViewMode } from "@/store/types";
-import type { Niivue } from "@niivue/niivue";
+import type { NiiVue } from "@niivue/niivue";
 
 interface CanvasAreaProps {
-  nvInstance: Niivue;
+  nvInstance: NiiVue;
   viewMode: ViewMode;
   onFileUpload: (files: File[]) => Promise<void>;
   nvCanvasEmptyState?: React.ReactNode;
+  onAttachCanvas?: (promise: Promise<unknown>) => void;
 }
 
-export default function CanvasArea({ nvInstance, viewMode, onFileUpload, nvCanvasEmptyState }: CanvasAreaProps) {
+export default function CanvasArea({
+  nvInstance,
+  viewMode,
+  onFileUpload,
+  nvCanvasEmptyState,
+  onAttachCanvas,
+}: CanvasAreaProps) {
   const showUploader = useFreeBrowseStore((s) => s.showUploader);
 
   return (
@@ -22,7 +29,11 @@ export default function CanvasArea({ nvInstance, viewMode, onFileUpload, nvCanva
         </div>
       ) : (
         <div className="flex flex-1">
-          <ImageCanvas viewMode={viewMode} nvRef={nvInstance} />
+          <ImageCanvas
+            viewMode={viewMode}
+            nvRef={nvInstance}
+            onAttachCanvas={onAttachCanvas}
+          />
         </div>
       )}
     </main>

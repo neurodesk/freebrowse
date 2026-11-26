@@ -17,12 +17,12 @@ branch [`v1`](https://github.com/freesurfer/freebrowse/tree/v1).
 
 Try out the 'serverless' version: [https://freesurfer.github.io/freebrowse/](https://freesurfer.github.io/freebrowse/)
 
-- [A FreeSurfer segmentation overlayed on a t1-weighted anatomical MRI; from openneuro.org](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/pwighton/freebrowse-test-data/refs/heads/main/openneuro/ds004731/sub-SM07.nvd)
-- [FreeSurfer surfaces overlayed on a t1-weighted anatomical MRI showing volume/surface intersections](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/pwighton/freebrowse-test-data/main/freesurfer/surfaces/mgz-surf-eg.nvd)
-- [A FreeSurfer surface with a curvature overlay](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/pwighton/freebrowse-test-data/refs/heads/main/freesurfer/surfaces/surf-overlay-eg.nvd)
-- [PET total volume of distribution (VT) overlaid on an MNI template](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/pwighton/freebrowse-test-data/main/pet/petsurfer-bids/petsurfer-km.nvd)
-- [4D PET data](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/pwighton/freebrowse-test-data/main/pet/4d-eg.nvd)
-  - This one may take some time to load.  Niivue has optimizations for 4d data which have yet to be implemented
+- [A FreeSurfer segmentation overlayed on a t1-weighted anatomical MRI; with cortex and pial surfaces](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/freesurfer/freebrowse/refs/heads/main/data/remote/vol-surf-intersection.nvd)
+- [A FreeSurfer surface with a curvature overlay](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/freesurfer/freebrowse/refs/heads/main/data/remote/surf-overlay.nvd)
+- [FreeSurfer surfaces with annotation overlays](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/freesurfer/freebrowse/refs/heads/main/data/remote/surf-annotation.nvd)
+- [PET total volume of distribution (VT) overlaid on an MNI template](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/pwighton/freebrowse-test-data/main/pet/petsurfer-bids/petsurfer-km.v9.nvd)
+- [4D PET data overlayed on MNI305](https://freesurfer.github.io/freebrowse/?nvd=https://raw.githubusercontent.com/freesurfer/freebrowse/refs/heads/main/data/remote/4d-pet-over-mni305.nvd)
+  - This one may take some time to load.  NiiVue has optimizations for 4d data which have yet to be implemented
 
 ## Architecture
 
@@ -35,6 +35,134 @@ Try out the 'serverless' version: [https://freesurfer.github.io/freebrowse/](htt
 **Backend:**
 - [FastAPI](https://fastapi.tiangolo.com) (Python web framework)
 - [Pixi](https://pixi.sh) (package manager)
+
+## NiiVue documents (`.nvd`)
+
+A FreeBrowse scene is a plain [NiiVue document](https://github.com/niivue/mono/blob/main/packages/niivue/src/NVDocument.ts)
+(`NVDocumentData`, schema version 9).
+
+The **Download** dialog writes it as JSON (text) or CBOR (binary);
+loading detects the encoding, so either can be passed to `?nvd=`, dropped onto
+the viewer, or embedded in a single-file build.
+
+- **Downloaded documents are self-contained**: every volume's voxels are embedded
+  (`volumes[i].data`), so the file stands alone. Meshes are embedded as geometry
+  too, but mesh *overlays* (curvature, thickness) are not yet persisted — see
+  [#43](https://github.com/freesurfer/freebrowse/issues/43).
+- **Saved-to-backend documents are linked**: volumes are uploaded as `.nii.gz`
+  and the document references them by URL. The one FreeBrowse-specific save
+  behaviour is `retargetVolumeUrls` (`frontend/src/lib/nvd-volume-urls.ts`),
+  which points each volume entry at the path it is being uploaded to; a volume
+  given no destination keeps its bytes.
+- **Loading changes only what the document sets.** FreeBrowse loads with
+  niivue's `fill: "current"` policy, so a document that says nothing about,
+  say, the crosshair colour or the view layout leaves the current viewer
+  settings alone.
+
+**Documents from FreeBrowse ≤ 2.4 (classic niivue) do not load** — the viewer
+reports *"This .nvd predates the niivue document schema"*. Convert them once
+with the stdlib-only migration script, which writes `<name>.v9.nvd` next to
+each input (originals are never touched) and handles documents with embedded
+volumes:
+
+```bash
+python3 scripts/migrate-nvd.py path/to/docs/        # directory, file or glob
+python3 scripts/migrate-nvd.py scene.nvd --cbor     # binary output (needs cbor2)
+```
+
+`scripts/nvd-embed.py` embeds a document into a single-file build (see
+[Build](#build)), and `python3 -m pytest` runs the script's tests.
+
+## Embedding FreeBrowse in your own app (npm package)
+
+FreeBrowse is published to npm as `freebrowse`:
+
+```bash
+npm install freebrowse @niivue/niivue@1.0.0-rc.38
+```
+
+`@niivue/niivue` is a peer dependency: **you** create the NiiVue instance, FreeBrowse renders
+its UI for it, and anything you do to the instance through niivue's API shows up in that UI
+(see [Driving FreeBrowse from your own code](#driving-freebrowse-from-your-own-code)). A
+classic-niivue (0.x) instance cannot be used — the package targets niivue 1.0.
+
+**Vanilla JavaScript** (React is bundled; nothing else to install):
+
+```js
+import { NiiVue } from "@niivue/niivue";
+import { mountFreeBrowse } from "freebrowse";
+import "freebrowse/style.css";
+
+const nv = new NiiVue({ backgroundColor: [0, 0, 0, 1] });
+const fb = mountFreeBrowse(document.getElementById("viewer"), { nv });
+await nv.addVolume({ url: "https://niivue.com/demos/images/mni152.nii.gz" });
+// ... later
+fb.destroy();
+```
+
+**React 19 hosts** (`react` / `react-dom` are peers on this entry, not bundled):
+
+```jsx
+import { FreeBrowse, configureFreeBrowse } from "freebrowse/react";
+import "freebrowse/style.css";
+
+configureFreeBrowse({ backend: null });   // once, before the first render
+<FreeBrowse nv={nv} hostInstance />
+```
+
+`mountFreeBrowse(container, options)` options, all optional:
+
+| option | default | meaning |
+| --- | --- | --- |
+| `nv` | created for you | Your NiiVue instance. When given, FreeBrowse seeds its UI from the instance's settings and never pushes its own defaults onto it. |
+| `backend` | `null` | `{ dataUrl, aiUrl }` of a FreeBrowse backend. `null` hides Save-to-server, the Data/NVD tabs and AI. |
+| `persist` | `"freebrowse-user-settings"` | localStorage key for user preferences, or `false` to keep them in memory. |
+| `readUrlParams` | `false` | Honour `?nvd=` / `?vol=` on the host page URL. |
+| `exposeGlobal` | `false` | Also publish the instance as `window.freebrowse.nv`. |
+| `downloadDisabled` | `false` | Disable the Download button and niivue's save-to-disk methods (defaults to build-time `VITE_DISABLE_DOWNLOAD`). |
+| `allowExternalDocumentUrls` | `true` | Allow `.nvd` documents to fetch linked volumes, meshes, layers, thumbnails, matcaps, or slide planes. Set `false` inside authenticated embedding hosts (like JupyterLab) to accept only self-contained `.nvd` scenes. |
+| `dragDrop` | `true` | `false` turns off drag-and-drop loading (niivue's canvas drop and the drop zone) and shows the canvas from the start — for hosts that load data themselves. |
+| `sidebar` | `true` | Show the sidebar initially; the header button still toggles it. |
+| `footer` | `true` | Show the footer (coordinate readout) initially. |
+
+The handle returned has `nv`, `config`, `loadFile(file, signal?)`, `loadVolumeUrl(url, filename, signal?)`, and `destroy()`.
+Each mount gets its own isolated store and runtime configuration, so multiple viewers can be mounted simultaneously on the same page (use `persist: false` or distinct keys if sibling mounts should not share `localStorage` preferences). Styles are strictly scoped under `.freebrowse-root` and never touch your page's `html`/`body` or global utility classes; import
+`freebrowse/style.css` once. Working examples for both entries live in
+[`frontend/examples/`](frontend/examples/); they install `freebrowse` from npm.
+
+Releasing (maintainers): bump `version` in `frontend/package.json` (the app and the package
+share it), then from `frontend/`:
+
+```bash
+npm run build:package && npm run pack:check   # publint + arethetypeswrong on the tarball
+npm publish                                    # a `-next.N` pre-release: npm publish --tag next
+```
+
+## Driving FreeBrowse from your own code
+
+FreeBrowse's UI is a *derived view* of its NiiVue instance: the React store is
+updated only by the events niivue emits, and FreeBrowse's own controls go
+through the same path as any external caller. The live instance is exposed as
+`window.freebrowse.nv`, so from the browser console (or an embedding page) you
+can drive the viewer with niivue's API and watch the sidebar, toolbar and footer
+follow:
+
+```js
+const nv = window.freebrowse.nv;
+await nv.addVolume({ url: "https://niivue.com/demos/images/mni152.nii.gz" });
+await nv.setVolume(0, { colormap: "Hot", opacity: 0.8 });   // sidebar updates
+nv.sliceType = 4;                                            // toolbar switches to Render
+await nv.loadDocument(fileOrUrl);                            // document path, same events
+```
+
+**Supported mutations**: anything that emits an event: `setVolume(i, {...})`,
+`setMesh(i, {...})`, `setMeshLayerProperty`, `add`/`remove`/`move` methods, the
+flat setters (`sliceType`, `showRender`, `isRadiological`, `crosshairColor`,
+`drawOpacity`, …), the drawing API and `loadDocument`.
+
+**Not supported**: raw field writes such as `nv.volumes[0].colormap = "Hot"`.
+Niivue-mono volumes and meshes are plain objects, so nothing observes the write
+and the UI will not update.
 
 ## Install
 
@@ -198,9 +326,13 @@ variables. These are read-only at runtime.
 
 | Variable | Values | Effect |
 | --- | --- | --- |
-| `VITE_DISABLE_DOWNLOAD` | `true` / unset | Disables the **Download** button and no-ops niivue's save-to-disk methods (`saveImage`, `saveDocument`, `saveScene`, `saveHTML`, `saveToDisk`). For deploying into secure environments where local data export should be turned off. |
+| `VITE_DISABLE_DOWNLOAD` | `true` / unset | Disables the **Download** button and no-ops niivue's save-to-disk methods (`saveMesh`, `saveBitmap`, `saveDocument`, and `saveVolume` / `saveDrawing` whenever they are given a filename). In-memory exports (`saveVolume({filename: ""})`, `serializeDocument()`) keep working, so backend **Save**, AI sessions, save-drawing and edit-volume are unaffected. For deploying into secure environments where local data export should be turned off. |
 | `VITE_SERVERLESS` | `true` / unset | Builds for the `file://` protocol with no backend (set automatically by `build:serverless`). Also disables the backend **Save** button. |
 | `VITE_BASE_PATH` | e.g. `/freebrowse/` | Base URL path for routing/assets. |
+
+How a file opens from the Jupyter file browser (document tab or browser tab, who
+downloads it) is not a build variable: it is runtime Jupyter server
+configuration, see [Jupyter Integration → Configuration](#configuration).
 
 `VITE_DISABLE_DOWNLOAD` composes with every build target. Just prepend it to
 whichever build you run:
@@ -268,9 +400,11 @@ npm run build
 
 ## Jupyter Integration
 
-FreeBrowse can be used as a NIfTI file viewer inside JupyterLab or Jupyter
-Notebook 7. Clicking a `.nii`, `.nii.gz` or `.nvd` (niivue document) file in the
-file browser opens it in FreeBrowse in a new browser tab.
+FreeBrowse can be used as a NIfTI and FreeSurfer MGH file viewer inside
+JupyterLab or Jupyter Notebook 7. Clicking a `.nii`, `.nii.gz`, `.mgh`, `.mgz`
+or `.nvd` (niivue document) file in the file browser opens it in FreeBrowse,
+either in a document tab inside JupyterLab (the default) or in a new browser tab
+(see [Configuration](#configuration)).
 
 ### Setup
 
@@ -296,18 +430,177 @@ jupyter lab       # if using JupyterLab
 jupyter notebook  # if using Notebook 7
 ```
 
-Navigate to a directory containing `.nii`, `.nii.gz` or `.nvd` files, then either:
-- **Double-click** a file to open it in FreeBrowse in a new browser tab
+Navigate to a directory containing `.nii`, `.nii.gz`, `.mgh`, `.mgz` or `.nvd`
+files, then either:
+- **Double-click** a file to open it in FreeBrowse
 - **Right-click** a file and select **Open in FreeBrowse**
+
+Both open the file the same way: in a FreeBrowse document tab inside JupyterLab
+by default, or in a new browser tab if the deployment is configured that way
+(see [Configuration](#configuration)).
 
 [ipyniivue](https://github.com/niivue/ipyniivue) is also installed in the example
 `freebrowse-jupyter` environment.  See the [example notebooks repository](https://github.com/niivue/jupyter-notebooks)
 for examples on how to use niivue directly inside jupyter
 
+In the default `document` mode, FreeBrowse mounts directly inside a JupyterLab
+or Notebook 7 document tab as an in-DOM widget (no `<iframe>`), so it works out
+of the box under stock and `sandbox`-hardened JupyterHub `Content-Security-Policy`
+headers (`frame-ancestors 'none'`, including `sandbox allow-same-origin allow-scripts`
+without `allow-popups`) without relaxing CSP anywhere (note: if a custom CSP
+restricts `worker-src`, `blob:` is required for drawing/magic-wand workers).
+Each open tab gets an isolated viewer state and scoped CSS under `.freebrowse-root`,
+and `.nvd` scenes opened in-DOM must be self-contained (embedded data) so untrusted
+documents cannot initiate network requests from the authenticated JupyterLab origin
+(the standalone `open_in=browser` viewer retains normal `.nvd` URL loading).
+
+By default (`file_access=blob`), files are downloaded through Jupyter's
+contents service and authenticated `ServerConnection` (sending `X-XSRFToken` as
+a header rather than a query parameter), so JupyterHub base paths and filenames
+containing spaces or Unicode are supported. In `document` mode the viewer
+receives an in-memory `File` directly; in `browser` mode the new tab receives a
+temporary blob URL that is revoked when that tab closes. Viewer pages and
+assets for `browser` mode require the same authentication as the Jupyter
+server. On JupyterHub, browsers load the standalone viewer's module scripts and
+stylesheets with the session cookie but no XSRF token, so the `/freebrowse/`
+static directory accepts same-origin `GET`/`HEAD` requests without one; login
+is still required, `frame-ancestors` is left untouched, and cross-site requests
+and other methods keep the usual XSRF check.
+
+### Configuration
+
+Two deployment settings control how files open. They are **server-side,
+sysadmin-level** settings: the Jupyter server reads them once at startup and
+pushes them to every JupyterLab page, so a change needs a server restart and
+there is nothing for users to set in JupyterLab's settings editor.
+
+| Setting | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| `open_in` | `document`, `browser` | `document` | `document`: a FreeBrowse tab inside JupyterLab. `browser`: a new browser tab (the JupyterLab tab that briefly appears closes itself once the viewer tab has the file). |
+| `file_access` | `blob`, `url` | `blob` | `blob`: the JupyterLab page downloads the file through its authenticated connection and hands the viewer an in-memory copy. `url`: the viewer fetches the file from Jupyter's `/files/` endpoint itself, using the browser's Jupyter cookie plus the session's `_xsrf` query parameter that Jupyter requires on `/files/` requests. |
+
+When to pick what:
+
+- `blob` works with any Jupyter authentication scheme (JupyterHub included) but
+  keeps a copy of each open file in the JupyterLab page, and a viewer in its own
+  browser tab cannot be reloaded once the JupyterLab page that opened it is gone.
+- `url` holds no copy and viewer tabs reload fine, but it needs the browser to
+  send the Jupyter cookie along with the viewer's request, which some JupyterHub
+  setups do not allow. If files fail to load with `url` (a `403` on `/files/` in
+  the server log), switch back to `blob`.
+- `browser` needs the browser to allow pop-ups from the JupyterLab site. If they
+  are blocked, the JupyterLab tab stays open and says so.
+- Notebook 7 opens every file in its own browser tab anyway, so it ignores
+  `open_in` and honours `file_access`.
+
+There are two ways to set them. An environment variable always wins over a
+config file; a config file at a higher-priority directory wins over one at a
+lower-priority directory.
+
+**Environment variables** `FREEBROWSE_OPEN_IN` and `FREEBROWSE_FILE_ACCESS`,
+set wherever the Jupyter server is launched. Users cannot override them, which
+makes them the right choice for JupyterHub and containers:
+
+```bash
+# try it once
+FREEBROWSE_OPEN_IN=browser jupyter lab
+```
+
+```dockerfile
+# Docker image
+ENV FREEBROWSE_OPEN_IN=browser FREEBROWSE_FILE_ACCESS=url
+```
+
+```python
+# jupyterhub_config.py: every single-user server gets them
+c.Spawner.environment = {
+    "FREEBROWSE_OPEN_IN": "browser",
+    "FREEBROWSE_FILE_ACCESS": "url",
+}
+```
+
+```yaml
+# zero-to-jupyterhub values.yaml
+singleuser:
+  extraEnv:
+    FREEBROWSE_OPEN_IN: browser
+    FREEBROWSE_FILE_ACCESS: url
+```
+
+**Config file** named `jupyter_server_config.json` (or `.py`) in one of the
+directories `jupyter --paths` lists under `config:`. The directory sets the
+scope, the file name is the same at every level:
+
+```
+$ jupyter --paths
+config:
+    ~/.jupyter                     <- one user; overrides the ones below
+    ~/.local/etc/jupyter
+    $CONDA_PREFIX/etc/jupyter      <- one conda env or image
+    /usr/local/etc/jupyter
+    /etc/jupyter                   <- whole machine
+```
+
+```bash
+mkdir -p "$CONDA_PREFIX/etc/jupyter"
+cat > "$CONDA_PREFIX/etc/jupyter/jupyter_server_config.json" <<'EOF'
+{
+  "FreeBrowse": {
+    "open_in": "browser",
+    "file_access": "url"
+  }
+}
+EOF
+```
+
+or, in `jupyter_server_config.py`:
+
+```python
+c.FreeBrowse.open_in = "browser"
+c.FreeBrowse.file_access = "url"
+```
+
+Leave out any setting you want at its default. If the file already exists, add
+the `FreeBrowse` block next to its other keys. Do not put the file in
+`jupyter_server_config.d/`: Jupyter only reads that directory for the list of
+extensions to enable, and a `FreeBrowse` block there is ignored. Because the
+per-user directory has the highest priority, a user can override a config file
+from `~/.jupyter`; use the environment variables, or start the server with
+`JUPYTER_PREFER_ENV_PATH=1`, if that matters.
+
+Restart the server, then confirm with the startup log line
+`jupyterlab_freebrowse server extension loaded (open_in=..., file_access=...)`
+or with `jupyter server --show-config`, which lists the loaded files and the
+`FreeBrowse` values. A value outside the table above (for example `tab`) stops
+the server extension from loading, with a `TraitError` in the log naming the
+allowed values. `jupyter lab --FreeBrowse.open_in=...` on the command line is not
+supported; use the environment variable instead.
+
 ### Development
 
-If you make changes to the frontend, you will have to rebuild the `jupyter` before
-they become visible in Jupyter notebooks.
+Run the Jupyter integration regression tests after installing the JavaScript and
+Python test dependencies:
+
+```bash
+cd jupyter
+jlpm install
+python -m pip install -r requirements-test.txt
+jlpm test
+```
+
+These tests exercise document opening, authenticated file downloads, filename
+handling, rename/disposal races, and real Jupyter HTTP authentication for viewer
+assets at root and JupyterHub base paths, including JupyterHub's own cookie and
+XSRF checks.
+
+The FreeBrowse bundles used by JupyterLab — the in-DOM embed module
+(`jupyter/embed/`, bundled into the labextension as a lazy chunk by
+`jlpm build`) and the standalone viewer served at `/freebrowse/` for
+`open_in=browser` (`jupyter/jupyterlab_freebrowse/static/freebrowse/`) — are
+build outputs and are **not committed**: a fresh checkout has to generate them
+before building or installing the extension, and any frontend change needs them
+regenerated before it becomes visible in notebooks. (The server extension logs
+a warning at startup if the standalone bundle is missing.)
 
 ```bash
 cd frontend
